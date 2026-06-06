@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>联想背单词</title>
+<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: #f7f3f0; color: #2d2d2d; min-height: 100vh;
+}
+header {
+  background: #fff; border-bottom: 1px solid #e8e2dc;
+  padding: 24px; text-align: center; position: sticky; top: 0; z-index: 20;
+}
+header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+header p { font-size: 13px; color: #b8b8b8; margin-top: 2px; }
+.container { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+
+.card { background: #fff; border-radius: 16px; padding: 28px 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); margin-bottom: 16px; }
+
+/* ===== Stats ===== */
+.stats-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.stat-card { background: #fff; border-radius: 14px; padding: 20px 10px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.stat-card .stat-icon { font-size: 24px; margin-bottom: 4px; }
+.stat-card .stat-value { font-size: 26px; font-weight: 700; color: #c9a96e; }
+.stat-card .stat-label { font-size: 11px; color: #b8b8b8; margin-top: 2px; }
+
+/* ===== Check-in ===== */
+.checkin-area { display: flex; align-items: center; justify-content: space-between; background: #fff; border-radius: 14px; padding: 16px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); margin-bottom: 12px; }
+.checkin-area .ci-left { display: flex; align-items: center; gap: 12px; }
+.checkin-area .ci-left .ci-icon { font-size: 28px; }
+.checkin-area .ci-left .ci-text { font-size: 15px; font-weight: 600; }
+.checkin-area .ci-left .ci-sub { font-size: 12px; color: #b8b8b8; margin-top: 1px; }
+.btn-checkin { padding: 8px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.btn-checkin.active { background: #c9a96e; color: #fff; }
+.btn-checkin.active:hover { background: #b8955a; }
+.btn-checkin.done { background: #e8e2dc; color: #b8b8b8; cursor: default; }
+
+/* ===== Calendar ===== */
+.week-calendar { display: flex; justify-content: space-between; background: #fff; border-radius: 14px; padding: 14px 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); margin-bottom: 16px; }
+.week-calendar .cal-day { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+.week-calendar .cal-day .cal-label { font-size: 11px; color: #d0d0d0; font-weight: 500; }
+.week-calendar .cal-day .cal-dot { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; background: #f7f3f0; color: #d0d0d0; }
+.week-calendar .cal-day .cal-dot.filled { background: #c9a96e; color: #fff; }
+.week-calendar .cal-day .cal-dot.today { border: 2px solid #d4c5b8; background: #fff; color: #2d2d2d; }
+.week-calendar .cal-day .cal-dot.today.filled { border-color: #c9a96e; background: #c9a96e; color: #fff; }
+.week-calendar .cal-day .cal-dot.future { opacity: 0.3; }
+
+/* ===== Book bar ===== */
+.book-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: #fff; border-radius: 14px; padding: 14px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.book-bar label { font-size: 13px; font-weight: 600; color: #4a4a4a; white-space: nowrap; }
+.book-bar select { flex: 1; padding: 6px 10px; border: 1.5px solid #e8e2dc; border-radius: 8px; font-size: 13px; outline: none; background: #fafaf9; cursor: pointer; color: #2d2d2d; }
+.book-bar select:focus { border-color: #c9a96e; }
+.book-bar .btn-sm { padding: 6px 12px; border: 1.5px solid #e8e2dc; border-radius: 8px; background: none; font-size: 12px; cursor: pointer; color: #b8b8b8; white-space: nowrap; transition: all 0.2s; }
+.book-bar .btn-sm:hover { border-color: #c9a96e; color: #c9a96e; }
+
+/* ===== Word count bar ===== */
+.word-count-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; background: #fff; border-radius: 14px; padding: 14px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.word-count-bar label { font-size: 13px; font-weight: 600; color: #4a4a4a; white-space: nowrap; }
+.word-count-bar select { flex: 1; padding: 6px 10px; border: 1.5px solid #e8e2dc; border-radius: 8px; font-size: 13px; outline: none; background: #fafaf9; cursor: pointer; color: #2d2d2d; }
+.word-count-bar select:focus { border-color: #c9a96e; }
+.word-count-bar .total-note { font-size: 11px; color: #d0d0d0; white-space: nowrap; }
+
+/* ===== Mode cards ===== */
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mode-card { background: #fff; border: 1.5px solid #e8e2dc; border-radius: 14px; padding: 28px 16px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.mode-card:hover { border-color: #c9a96e; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(201,169,110,0.12); }
+.mode-card .icon { font-size: 40px; margin-bottom: 10px; }
+.mode-card .label { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.mode-card .desc { font-size: 12px; color: #b8b8b8; line-height: 1.4; }
+
+/* ===== Exit ===== */
+.btn-exit { padding: 6px 14px; background: none; border: 1.5px solid #e8e2dc; border-radius: 8px; font-size: 13px; color: #b8b8b8; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+.btn-exit:hover { border-color: #d4c5b8; color: #2d2d2d; }
+
+/* ===== Progress ===== */
+.progress-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 13px; color: #b8b8b8; }
+.progress-track { flex: 1; height: 4px; background: #f0ebe6; border-radius: 2px; margin: 0 12px; overflow: hidden; }
+.progress-fill { height: 100%; background: #c9a96e; border-radius: 2px; transition: width 0.3s; }
+
+/* ===== Word card ===== */
+.word-card { background: #fafaf9; border: 1.5px solid #f0ebe6; border-radius: 14px; padding: 28px 20px; text-align: center; margin-bottom: 24px; }
+.word-card .en { font-size: 34px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.5px; }
+.word-card .phonetic { font-size: 14px; color: #c9a96e; margin-bottom: 8px; }
+.word-card .def { font-size: 14px; color: #4a4a4a; max-width: 460px; margin: 0 auto 10px; line-height: 1.6; }
+.word-card .def .pos { font-weight: 600; color: #b8955a; }
+.word-card .zh { font-size: 16px; color: #b8b8b8; }
+.word-card .def-loading { font-size: 12px; color: #d0d0d0; }
+
+/* ===== Forms ===== */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 12px; color: #b8b8b8; margin-bottom: 4px; font-weight: 500; }
+.input-field { width: 100%; padding: 11px 14px; border: 1.5px solid #e8e2dc; border-radius: 10px; font-size: 15px; outline: none; transition: border 0.2s; background: #fafaf9; }
+.input-field:focus { border-color: #c9a96e; background: #fff; }
+
+.btn-primary { width: 100%; padding: 13px; background: #c9a96e; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+.btn-primary:hover { background: #b8955a; }
+.btn-primary:disabled { background: #e8e2dc; color: #d0d0d0; cursor: not-allowed; }
+
+/* ===== Emoji modal ===== */
+#emojiModal {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.25);
+}
+#emojiModal.open { display: flex; }
+#emojiModal .modal-box { background: #fff; border-radius: 16px; padding: 8px; width: 360px; max-width: 92vw; box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
+#emojiModal .modal-box emoji-picker { width: 100%; height: 400px; }
+#emojiModal .modal-close-btn {
+  display: block; margin: 8px auto 4px; padding: 8px 24px;
+  background: #f7f3f0; border: none; border-radius: 8px;
+  font-size: 13px; color: #b8b8b8; cursor: pointer;
+}
+
+.emoji-btn { padding: 10px 20px; background: #fafaf9; border: 1.5px solid #e8e2dc; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+.emoji-btn:hover { border-color: #c9a96e; background: #fff; }
+.emoji-display { width: 64px; height: 64px; border: 1.5px dashed #e8e2dc; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 32px; transition: all 0.2s; }
+.emoji-display.filled { border-style: solid; border-color: #c9a96e; }
+.emoji-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+
+/* ===== Review ===== */
+.clue-area { background: #fafaf9; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 20px; border: 1.5px solid #f0ebe6; }
+.clue-area .label { font-size: 12px; color: #b8b8b8; margin-bottom: 8px; }
+.clue-area .clue-words { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.clue-area .clue-words span { background: #fff; border: 1.5px solid #e8e2dc; padding: 6px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+.clue-area .clue-emoji { font-size: 60px; }
+
+.options { display: grid; gap: 10px; }
+.option-btn { padding: 13px 18px; border: 1.5px solid #e8e2dc; border-radius: 10px; background: #fff; font-size: 15px; cursor: pointer; text-align: center; font-weight: 500; transition: all 0.15s; }
+.option-btn:hover { border-color: #c9a96e; background: #fafaf9; }
+.option-btn.correct { border-color: #9bb88b; background: #f6f9f4; color: #5a7a4a; }
+.option-btn.wrong { border-color: #d49595; background: #fdf5f5; color: #8a4a4a; }
+.option-btn:disabled { cursor: default; }
+
+/* ===== Result ===== */
+.result-score { text-align: center; padding: 28px 0; }
+.result-score .score-num { font-size: 56px; font-weight: 700; color: #c9a96e; }
+.result-score .score-label { font-size: 14px; color: #b8b8b8; margin-top: 4px; }
+.result-detail { margin: 16px 0; }
+.result-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #f0ebe6; }
+.result-item .ri-word { font-weight: 600; font-size: 14px; }
+.result-item .ri-word .ri-zh { color: #b8b8b8; font-weight: 400; font-size: 13px; }
+.result-item .ri-status { font-size: 18px; }
+.result-actions { display: flex; gap: 10px; margin-top: 20px; }
+.result-actions .btn-primary, .result-actions .btn-secondary { flex: 1; }
+.btn-secondary { padding: 13px; background: #fafaf9; border: 1.5px solid #e8e2dc; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-align: center; color: #2d2d2d; }
+.btn-secondary:hover { border-color: #d4c5b8; background: #fff; }
+
+/* ===== Badges ===== */
+.mode-badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+.mode-badge.toefl { background: #f7f3f0; color: #c9a96e; }
+.mode-badge.association { background: #f6f9f4; color: #9bb88b; }
+.mode-badge.emoji { background: #fdf5f5; color: #d49595; }
+
+/* ===== Book management ===== */
+.mgmt-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.mgmt-header h3 { font-size: 18px; font-weight: 700; flex: 1; }
+.mgmt-header .btn-back { padding: 6px 12px; border: 1.5px solid #e8e2dc; border-radius: 8px; background: none; font-size: 13px; cursor: pointer; color: #b8b8b8; }
+.mgmt-header .btn-back:hover { border-color: #d4c5b8; color: #2d2d2d; }
+.mgmt-list { margin: 12px 0; }
+.mgmt-item { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border: 1.5px solid #f0ebe6; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
+.mgmt-item:hover { border-color: #d4c5b8; }
+.mgmt-item .mi-info { flex: 1; }
+.mgmt-item .mi-title { font-size: 15px; font-weight: 600; }
+.mgmt-item .mi-sub { font-size: 12px; color: #b8b8b8; margin-top: 2px; }
+.mgmt-item .mi-actions { display: flex; gap: 6px; }
+.mgmt-item .mi-actions button { padding: 4px 10px; border: 1px solid #e8e2dc; border-radius: 6px; background: none; font-size: 12px; cursor: pointer; color: #b8b8b8; }
+.mgmt-item .mi-actions button:hover { border-color: #d49595; color: #d49595; }
+.mgmt-item .mi-actions button.edit:hover { border-color: #c9a96e; color: #c9a96e; }
+
+.mgmt-add { display: flex; gap: 8px; margin-bottom: 16px; }
+.mgmt-add input { flex: 1; padding: 10px 14px; border: 1.5px solid #e8e2dc; border-radius: 10px; font-size: 14px; outline: none; background: #fafaf9; }
+.mgmt-add input:focus { border-color: #c9a96e; }
+.mgmt-add button { padding: 10px 20px; background: #c9a96e; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.mgmt-add button:hover { background: #b8955a; }
+
+.word-add-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.word-add-row input { flex: 1; padding: 10px 14px; border: 1.5px solid #e8e2dc; border-radius: 10px; font-size: 14px; outline: none; background: #fafaf9; }
+.word-add-row input:focus { border-color: #c9a96e; }
+.word-add-row button { padding: 10px 16px; background: #c9a96e; color: #fff; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.word-add-row button:hover { background: #b8955a; }
+
+.word-list { margin: 8px 0; }
+.wl-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0ebe6; }
+.wl-item .wl-word { font-size: 14px; font-weight: 600; }
+.wl-item .wl-zh { font-size: 13px; color: #b8b8b8; margin-left: 8px; }
+.wl-item .wl-del { padding: 2px 8px; border: none; background: none; font-size: 16px; cursor: pointer; color: #d0d0d0; }
+.wl-item .wl-del:hover { color: #d49595; }
+
+.empty-note { text-align: center; padding: 32px 0; color: #d0d0d0; font-size: 14px; }
+
+.hidden { display: none !important; }
+
+@media (max-width: 500px) {
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .stat-card:last-child { grid-column: span 2; }
+  .card { padding: 20px 16px; }
+  .word-card .en { font-size: 28px; }
+  .mode-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📚 联想背单词</h1>
+  <p>TOEFL 词汇 · 联想记忆法</p>
+</header>
+
+<!-- Emoji modal (fixed overlay, not clipped) -->
+<div id="emojiModal">
+  <div class="modal-box">
+    <emoji-picker id="emojiPicker"></emoji-picker>
+    <button class="modal-close-btn" id="emojiCloseBtn">关闭</button>
+  </div>
+</div>
+
+<div class="container" id="app"></div>
+
+<script>
+const DEFAULT_BOOK_NAME = '托福核心词汇';
+
+const TOEFL_WORDS = [
+  { en: 'abandon', zh: '放弃' }, { en: 'abundant', zh: '丰富的' }, { en: 'accumulate', zh: '积累' },
+  { en: 'accurate', zh: '精确的' }, { en: 'acquire', zh: '获得' }, { en: 'adequate', zh: '足够的' },
+  { en: 'advocate', zh: '倡导' }, { en: 'ambiguous', zh: '模糊的' }, { en: 'analyze', zh: '分析' },
+  { en: 'annual', zh: '每年的' }, { en: 'apparent', zh: '明显的' }, { en: 'assess', zh: '评估' },
+  { en: 'assume', zh: '假设' }, { en: 'available', zh: '可用的' }, { en: 'benefit', zh: '好处' },
+  { en: 'capacity', zh: '能力' }, { en: 'challenge', zh: '挑战' }, { en: 'circumstance', zh: '环境' },
+  { en: 'clarify', zh: '澄清' }, { en: 'collapse', zh: '崩溃' }, { en: 'compensate', zh: '补偿' },
+  { en: 'complex', zh: '复杂的' }, { en: 'component', zh: '组成部分' }, { en: 'concentrate', zh: '集中' },
+  { en: 'concept', zh: '概念' }, { en: 'conclude', zh: '得出结论' }, { en: 'concrete', zh: '具体的' },
+  { en: 'conduct', zh: '进行' }, { en: 'confirm', zh: '确认' }, { en: 'conflict', zh: '冲突' },
+  { en: 'consequence', zh: '后果' }, { en: 'considerable', zh: '相当大的' }, { en: 'constant', zh: '不变的' },
+  { en: 'consume', zh: '消耗' }, { en: 'contemporary', zh: '当代的' }, { en: 'contradict', zh: '矛盾' },
+  { en: 'contribute', zh: '贡献' }, { en: 'conventional', zh: '传统的' }, { en: 'convince', zh: '使确信' },
+  { en: 'coordinate', zh: '协调' }, { en: 'crucial', zh: '关键的' }, { en: 'decade', zh: '十年' },
+  { en: 'decline', zh: '下降' }, { en: 'demonstrate', zh: '展示' }, { en: 'derive', zh: '源于' },
+  { en: 'diminish', zh: '减少' }, { en: 'distinct', zh: '不同的' }, { en: 'distinguish', zh: '区分' },
+  { en: 'diverse', zh: '多样的' }, { en: 'domestic', zh: '国内的' }, { en: 'dominant', zh: '主导的' },
+  { en: 'dynamic', zh: '动态的' }, { en: 'efficient', zh: '高效的' }, { en: 'eliminate', zh: '消除' },
+  { en: 'emerge', zh: '出现' }, { en: 'emphasis', zh: '强调' }, { en: 'enable', zh: '使能够' },
+  { en: 'enormous', zh: '巨大的' }, { en: 'establish', zh: '建立' }, { en: 'evaluate', zh: '评估' },
+  { en: 'evident', zh: '明显的' }, { en: 'evolve', zh: '进化' }, { en: 'expand', zh: '扩展' },
+  { en: 'explicit', zh: '明确的' }, { en: 'feasible', zh: '可行的' }, { en: 'flexible', zh: '灵活的' },
+  { en: 'fluctuate', zh: '波动' }, { en: 'focus', zh: '集中' }, { en: 'function', zh: '功能' },
+  { en: 'fundamental', zh: '基本的' }, { en: 'generate', zh: '产生' }, { en: 'genuine', zh: '真正的' },
+  { en: 'global', zh: '全球的' }, { en: 'guarantee', zh: '保证' }, { en: 'harmony', zh: '和谐' },
+  { en: 'highlight', zh: '强调' }, { en: 'hypothesis', zh: '假设' }, { en: 'identify', zh: '识别' },
+  { en: 'illustrate', zh: '说明' }, { en: 'impact', zh: '影响' }, { en: 'implement', zh: '实施' },
+  { en: 'imply', zh: '暗示' }, { en: 'inevitable', zh: '不可避免的' }, { en: 'influence', zh: '影响' },
+  { en: 'initial', zh: '最初的' }, { en: 'integrate', zh: '整合' }, { en: 'interpret', zh: '解释' },
+  { en: 'investigate', zh: '调查' }, { en: 'involve', zh: '涉及' }, { en: 'isolate', zh: '隔离' },
+  { en: 'justify', zh: '证明' }, { en: 'launch', zh: '发射' }, { en: 'logical', zh: '逻辑的' },
+  { en: 'maintain', zh: '维持' }, { en: 'massive', zh: '大量的' }, { en: 'mature', zh: '成熟的' },
+  { en: 'method', zh: '方法' }, { en: 'migrate', zh: '迁徙' }, { en: 'modify', zh: '修改' },
+  { en: 'negotiate', zh: '谈判' }, { en: 'nevertheless', zh: '然而' }, { en: 'objective', zh: '目标' },
+  { en: 'obtain', zh: '获得' }, { en: 'obvious', zh: '明显的' }, { en: 'occupy', zh: '占据' },
+  { en: 'option', zh: '选项' }, { en: 'outcome', zh: '结果' }, { en: 'participate', zh: '参与' },
+  { en: 'perceive', zh: '感知' }, { en: 'persist', zh: '坚持' }, { en: 'perspective', zh: '观点' },
+  { en: 'phenomenon', zh: '现象' }, { en: 'potential', zh: '潜力' }, { en: 'precise', zh: '精确的' },
+  { en: 'predict', zh: '预测' }, { en: 'preserve', zh: '保存' }, { en: 'previous', zh: '之前的' },
+  { en: 'principle', zh: '原则' }, { en: 'priority', zh: '优先' }, { en: 'procedure', zh: '程序' },
+  { en: 'promote', zh: '促进' }, { en: 'qualified', zh: '合格的' }, { en: 'random', zh: '随机的' },
+  { en: 'range', zh: '范围' }, { en: 'rational', zh: '理性的' }, { en: 'recover', zh: '恢复' },
+  { en: 'reduce', zh: '减少' }, { en: 'reflect', zh: '反映' }, { en: 'regulate', zh: '监管' },
+  { en: 'reject', zh: '拒绝' }, { en: 'relevant', zh: '相关的' }, { en: 'reluctant', zh: '不情愿的' },
+  { en: 'rely', zh: '依赖' }, { en: 'represent', zh: '代表' }, { en: 'resolve', zh: '解决' },
+  { en: 'resource', zh: '资源' }, { en: 'restore', zh: '恢复' }, { en: 'restrict', zh: '限制' },
+  { en: 'reveal', zh: '揭示' }, { en: 'revenue', zh: '收入' }, { en: 'revise', zh: '修订' },
+  { en: 'schedule', zh: '日程' }, { en: 'secure', zh: '安全的' }, { en: 'significant', zh: '重要的' },
+  { en: 'similar', zh: '相似的' }, { en: 'sophisticated', zh: '复杂的' }, { en: 'source', zh: '来源' },
+  { en: 'specific', zh: '具体的' }, { en: 'stable', zh: '稳定的' }, { en: 'strategy', zh: '策略' },
+  { en: 'structure', zh: '结构' }, { en: 'subsequent', zh: '随后的' }, { en: 'substantial', zh: '大量的' },
+  { en: 'sufficient', zh: '足够的' }, { en: 'summarize', zh: '总结' }, { en: 'temporary', zh: '暂时的' },
+  { en: 'tend', zh: '倾向' }, { en: 'therefore', zh: '因此' }, { en: 'thorough', zh: '彻底的' },
+  { en: 'transfer', zh: '转移' }, { en: 'transform', zh: '转变' }, { en: 'transition', zh: '过渡' },
+  { en: 'trigger', zh: '触发' }, { en: 'ultimate', zh: '最终的' }, { en: 'undergo', zh: '经历' },
+  { en: 'unique', zh: '独特的' }, { en: 'universal', zh: '普遍的' }, { en: 'valid', zh: '有效的' },
+  { en: 'vary', zh: '变化' }, { en: 'vast', zh: '广阔的' }, { en: 'virtual', zh: '虚拟的' },
+  { en: 'visible', zh: '可见的' }, { en: 'vital', zh: '至关重要的' }, { en: 'vulnerable', zh: '脆弱的' },
+  { en: 'widespread', zh: '广泛的' }, { en: 'withstand', zh: '承受' }, { en: 'yield', zh: '产出' },
+];
+
+const STORAGE_KEY = 'vocabLinkApp';
+const DEF_CACHE_KEY = 'vocabDefCache';
+const STATS_KEY = 'vocabStats';
+const BOOKS_KEY = 'vocabBooks';
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/* ===== Persist helpers ===== */
+function loadJSON(key, def) { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : def; } catch { return def; } }
+function saveJSON(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
+
+function loadState() { return loadJSON(STORAGE_KEY, null); }
+function saveState(s) { saveJSON(STORAGE_KEY, s); }
+function clearState() { localStorage.removeItem(STORAGE_KEY); }
+
+function loadStats() { return loadJSON(STATS_KEY, null); }
+function saveStats(s) { saveJSON(STATS_KEY, s); }
+function defaultStats() { return { checkInDates: [], totalWords: 0, totalSessions: 0 }; }
+
+/* ===== Books ===== */
+function loadBooks() {
+  let books = loadJSON(BOOKS_KEY, null);
+  if (!books) {
+    books = { [DEFAULT_BOOK_NAME]: { words: [...TOEFL_WORDS], isDefault: true } };
+    saveJSON(BOOKS_KEY, books);
+  } else if (!books[DEFAULT_BOOK_NAME]) {
+    books[DEFAULT_BOOK_NAME] = { words: [...TOEFL_WORDS], isDefault: true };
+    saveJSON(BOOKS_KEY, books);
+  }
+  return books;
+}
+function saveBooks(books) { saveJSON(BOOKS_KEY, books); }
+function getBookNames() { return Object.keys(loadBooks()); }
+function getBook(name) { const b = loadBooks(); return b[name] || null; }
+function getBookWordCount(name) { const b = getBook(name); return b ? b.words.length : 0; }
+
+/* ===== Date ===== */
+function getToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function calcStreak(dates) {
+  if (!dates || !dates.length) return 0;
+  const set = new Set(dates);
+  let streak = 0, d = new Date();
+  if (!set.has(getToday())) d.setDate(d.getDate() - 1);
+  while (true) {
+    const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (set.has(s)) { streak++; d.setDate(d.getDate() - 1); } else break;
+  }
+  return streak;
+}
+function doCheckIn() {
+  const stats = loadStats() || defaultStats();
+  const today = getToday();
+  if (!stats.checkInDates.includes(today)) {
+    stats.checkInDates.push(today);
+    stats.totalSessions = (stats.totalSessions || 0) + 1;
+    saveStats(stats);
+  }
+  return stats;
+}
+
+/* ===== Definition API ===== */
+function getCachedDef(word) { return loadJSON(DEF_CACHE_KEY, {})[word] || null; }
+function setCachedDef(word, data) {
+  const c = loadJSON(DEF_CACHE_KEY, {});
+  c[word] = data;
+  saveJSON(DEF_CACHE_KEY, c);
+}
+async function fetchDefinition(word) {
+  const c = getCachedDef(word);
+  if (c) return c;
+  const r = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+  if (!r.ok) throw new Error('Not found');
+  const d = await r.json();
+  setCachedDef(word, d);
+  return d;
+}
+function formatDef(data) {
+  if (!data || !data[0] || !data[0].meanings) return null;
+  const e = data[0];
+  const phonetic = e.phonetic || (e.phonetics && e.phonetics.find(p => p.text)?.text) || '';
+  const m = e.meanings[0];
+  return { phonetic, pos: m.partOfSpeech, def: m.definitions[0]?.definition || '' };
+}
+
+/* ===== State ===== */
+function defaultState() {
+  return { mode: null, phase: null, wordList: [], currentIdx: 0, reviewIdx: 0, entries: {}, reviewResults: [], wordCount: 10, selectedBook: DEFAULT_BOOK_NAME };
+}
+
+let state = defaultState();
+const saved = loadState();
+if (saved && saved.phase && saved.phase !== 'done') { state = saved; }
+let stats = loadStats() || defaultStats();
+
+const $app = document.getElementById('app');
+const $emojiModal = document.getElementById('emojiModal');
+const $emojiPicker = document.getElementById('emojiPicker');
+
+/* ===== Emoji modal ===== */
+let _emojiCallback = null;
+$emojiPicker.addEventListener('emoji-click', (e) => {
+  if (_emojiCallback) _emojiCallback(e.detail.unicode);
+  $emojiModal.classList.remove('open');
+});
+document.getElementById('emojiCloseBtn').addEventListener('click', () => {
+  $emojiModal.classList.remove('open');
+});
+$emojiModal.addEventListener('click', (e) => {
+  if (e.target === $emojiModal) $emojiModal.classList.remove('open');
+});
+
+function openEmojiPicker(callback) {
+  _emojiCallback = callback;
+  $emojiModal.classList.add('open');
+}
+
+/* ===== Render ===== */
+function render() {
+  if (!state.phase || state.phase === 'done') {
+    if (!state.phase) renderHome();
+    else renderResult();
+  } else if (state.phase === 'learning') renderLearning();
+  else if (state.phase === 'review') renderReview();
+}
+
+/* ============ HOME ============ */
+function renderHome() {
+  stats = loadStats() || defaultStats();
+  const today = getToday();
+  const checkedInToday = stats.checkInDates.includes(today);
+  const streak = calcStreak(stats.checkInDates);
+  const totalWords = stats.totalWords || 0;
+  const totalSessions = stats.totalSessions || 0;
+  const books = loadBooks();
+  const bookNames = Object.keys(books);
+  const currentBook = state.selectedBook && books[state.selectedBook] ? state.selectedBook : DEFAULT_BOOK_NAME;
+  const currentBookWords = books[currentBook] ? books[currentBook].words.length : 0;
+
+  const now = new Date(), dow = now.getDay();
+  const monday = new Date(now); monday.setDate(now.getDate() - ((dow + 6) % 7));
+  const calDays = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    calDays.push({ label: ['日','一','二','三','四','五','六'][d.getDay()], checked: stats.checkInDates.includes(ds), today: ds === today, future: d > now });
+  }
+
+  $app.innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value">${streak}</div><div class="stat-label">连续学习天数</div></div>
+      <div class="stat-card"><div class="stat-icon">📖</div><div class="stat-value">${totalWords}</div><div class="stat-label">累计掌握单词</div></div>
+      <div class="stat-card"><div class="stat-icon">📅</div><div class="stat-value">${totalSessions}</div><div class="stat-label">学习次数</div></div>
+    </div>
+    <div class="week-calendar">${calDays.map(d => `<div class="cal-day"><span class="cal-label">${d.label}</span><span class="cal-dot ${d.checked?'filled':''} ${d.today?'today':''} ${d.future?'future':''}">${d.checked?'✓':d.today?'今':''}</span></div>`).join('')}</div>
+    <div class="checkin-area">
+      <div class="ci-left">
+        <span class="ci-icon">${checkedInToday?'✅':'📌'}</span>
+        <div><div class="ci-text">${checkedInToday?'今日已打卡':'今天还没有学习'}</div><div class="ci-sub">${checkedInToday?'继续保持！':'开始学习自动打卡'}</div></div>
+      </div>
+      <button class="btn-checkin ${checkedInToday?'done':'active'}" id="checkinBtn" ${checkedInToday?'disabled':''}>${checkedInToday?'已打卡':'打卡'}</button>
+    </div>
+    <div class="book-bar">
+      <label>📖 词汇书</label>
+      <select id="bookSelect">
+        ${bookNames.map(n => `<option value="${n}" ${n===currentBook?'selected':''}>${n} (${books[n].words.length}词)</option>`).join('')}
+      </select>
+      <button class="btn-sm" id="manageBooksBtn">管理</button>
+    </div>
+    <div class="word-count-bar">
+      <label>每次学习</label>
+      <select id="wordCountSelect">
+        ${[5,10,15,20,25,30].map(n => `<option value="${n}" ${state.wordCount===n?'selected':''}>${n} 个词</option>`).join('')}
+        <option value="${currentBookWords}" ${state.wordCount===currentBookWords?'selected':''}>全部 ${currentBookWords} 词</option>
+      </select>
+      <span class="total-note">共 ${currentBookWords} 词</span>
+    </div>
+    <div class="mode-grid">
+      <div class="mode-card" data-action="start-association"><div class="icon">📝</div><div class="label">联想词模式</div><div class="desc">输入 5 个相关单词<br>复习时根据联想词回忆原词</div></div>
+      <div class="mode-card" data-action="start-emoji"><div class="icon">😊</div><div class="label">Emoji 模式</div><div class="desc">为单词选一个 Emoji<br>复习时根据 Emoji 回忆原词</div></div>
+    </div>
+    ${saved && saved.phase && saved.phase !== 'done' ? '<div style="margin-top:12px;"><button class="btn-secondary" data-action="continue" style="width:100%;">继续上次学习</button></div>' : ''}
+  `;
+
+  document.getElementById('bookSelect').addEventListener('change', (e) => {
+    state.selectedBook = e.target.value;
+    saveState(state);
+    renderHome();
+  });
+  document.getElementById('manageBooksBtn').addEventListener('click', renderBookManager);
+  document.getElementById('wordCountSelect').addEventListener('change', (e) => {
+    state.wordCount = parseInt(e.target.value);
+    saveState(state);
+  });
+  document.getElementById('checkinBtn').addEventListener('click', () => { if (!checkedInToday) { stats = doCheckIn(); renderHome(); } });
+  $app.querySelectorAll('[data-action]').forEach(el => {
+    el.addEventListener('click', () => {
+      const a = el.dataset.action;
+      if (a === 'start-association') startMode('association');
+      else if (a === 'start-emoji') startMode('emoji');
+      else if (a === 'continue') { state = saved; render(); }
+    });
+  });
+}
+
+/* ============ BOOK MANAGER ============ */
+let _mgmtViewing = null; // book name being edited, null = list view
+
+function renderBookManager() {
+  const books = loadBooks();
+  const names = Object.keys(books);
+
+  if (!_mgmtViewing) {
+    // List all books
+    $app.innerHTML = `
+      <div class="card">
+        <div class="mgmt-header">
+          <button class="btn-back" id="mgmtBack">← 返回</button>
+          <h3>我的词汇书</h3>
+        </div>
+        <div class="mgmt-add">
+          <input id="newBookInput" placeholder="输入新词汇书名称">
+          <button id="newBookBtn">新建</button>
+        </div>
+        <div class="mgmt-list">
+          ${names.map(n => `
+            <div class="mgmt-item" data-book="${n}">
+              <div class="mi-info">
+                <div class="mi-title">${books[n].isDefault ? '📖' : '📓'} ${n}</div>
+                <div class="mi-sub">${books[n].words.length} 个词</div>
+              </div>
+              <div class="mi-actions">
+                <button class="edit" data-action="view-book">编辑</button>
+                ${books[n].isDefault ? '' : '<button data-action="del-book">删除</button>'}
+              </div>
+            </div>
+          `).join('')}
+          ${names.length === 0 ? '<div class="empty-note">还没有词汇书，新建一本吧</div>' : ''}
+        </div>
+      </div>
+    `;
+    document.getElementById('mgmtBack').addEventListener('click', () => { _mgmtViewing = null; renderHome(); });
+    document.getElementById('newBookBtn').addEventListener('click', () => {
+      const inp = document.getElementById('newBookInput');
+      const name = inp.value.trim();
+      if (!name) { alert('请输入词汇书名称'); return; }
+      if (books[name]) { alert('该名称已存在'); return; }
+      books[name] = { words: [], isDefault: false };
+      saveBooks(books);
+      inp.value = '';
+      renderBookManager();
+    });
+    document.querySelectorAll('[data-action="del-book"]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const name = el.closest('[data-book]').dataset.book;
+        if (confirm(`确定删除「${name}」？`)) {
+          delete books[name];
+          saveBooks(books);
+          renderBookManager();
+        }
+      });
+    });
+    document.querySelectorAll('[data-action="view-book"]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _mgmtViewing = el.closest('[data-book]').dataset.book;
+        renderBookManager();
+      });
+    });
+    // Also clicking the item itself should open it
+    document.querySelectorAll('.mgmt-item').forEach(el => {
+      el.addEventListener('click', () => {
+        _mgmtViewing = el.dataset.book;
+        renderBookManager();
+      });
+    });
+  } else {
+    // View single book words
+    const book = books[_mgmtViewing];
+    if (!book) { _mgmtViewing = null; renderBookManager(); return; }
+    $app.innerHTML = `
+      <div class="card">
+        <div class="mgmt-header">
+          <button class="btn-back" id="mgmtBack">← 返回</button>
+          <h3>${book.isDefault ? '📖' : '📓'} ${_mgmtViewing}</h3>
+          <span style="font-size:13px;color:#b8b8b8;">${book.words.length} 词</span>
+        </div>
+        <div class="word-add-row">
+          <input id="wordEnInput" placeholder="英文">
+          <input id="wordZhInput" placeholder="中文">
+          <button id="addWordBtn">添加</button>
+        </div>
+        <div class="word-list">
+          ${book.words.length === 0 ? '<div class="empty-note">还没有单词</div>' : book.words.map((w, i) => `
+            <div class="wl-item">
+              <div><span class="wl-word">${w.en}</span><span class="wl-zh">${w.zh}</span></div>
+              <button class="wl-del" data-idx="${i}">✕</button>
+            </div>
+          `).join('')}
+        </div>
+        ${book.isDefault ? '<div style="font-size:12px;color:#d0d0d0;text-align:center;margin-top:12px;">默认词汇书不可删除单词，可自建词汇书</div>' : ''}
+      </div>
+    `;
+    document.getElementById('mgmtBack').addEventListener('click', () => { _mgmtViewing = null; renderBookManager(); });
+    document.getElementById('addWordBtn').addEventListener('click', () => {
+      const en = document.getElementById('wordEnInput').value.trim();
+      const zh = document.getElementById('wordZhInput').value.trim();
+      if (!en || !zh) { alert('请填写英文和中文'); return; }
+      const b = loadBooks();
+      b[_mgmtViewing].words.push({ en, zh });
+      saveBooks(b);
+      document.getElementById('wordEnInput').value = '';
+      document.getElementById('wordZhInput').value = '';
+      renderBookManager();
+    });
+    if (!book.isDefault) {
+      document.querySelectorAll('.wl-del').forEach(el => {
+        el.addEventListener('click', () => {
+          const idx = parseInt(el.dataset.idx);
+          const b = loadBooks();
+          b[_mgmtViewing].words.splice(idx, 1);
+          saveBooks(b);
+          renderBookManager();
+        });
+      });
+    }
+  }
+}
+
+/* ============ START ============ */
+function startMode(mode) {
+  const books = loadBooks();
+  const bookName = state.selectedBook && books[state.selectedBook] ? state.selectedBook : DEFAULT_BOOK_NAME;
+  const bookWords = books[bookName].words;
+  const count = Math.min(state.wordCount || 10, bookWords.length);
+  const selected = shuffle(bookWords).slice(0, count);
+
+  state = defaultState();
+  state.mode = mode; state.phase = 'learning';
+  state.wordList = selected; state.wordCount = count;
+  state.selectedBook = bookName;
+  state.currentIdx = 0; state.entries = {}; state.reviewResults = [];
+
+  stats = doCheckIn();
+  saveState(state);
+  render();
+}
+
+/* ============ LEARNING ============ */
+function renderLearning() {
+  const word = state.wordList[state.currentIdx];
+  const total = state.wordList.length;
+  const current = state.currentIdx + 1;
+  const progress = (current / total) * 100;
+  const isAssoc = state.mode === 'association';
+
+  const cdef = getCachedDef(word.en);
+  let defHTML = '<div class="def-loading">加载释义中...</div>';
+  if (cdef) {
+    const f = formatDef(cdef);
+    defHTML = f ? `<div class="phonetic">${f.phonetic}</div><div class="def"><span class="pos">${f.pos}</span> ${f.def}</div>` : '';
+  } else {
+    fetchDefinition(word.en).then(() => { if (state.phase==='learning' && state.wordList[state.currentIdx]?.en===word.en) renderLearning(); })
+      .catch(() => setCachedDef(word.en, { _error: true }));
+  }
+
+  let inputHTML = '';
+  if (isAssoc) {
+    const sv = state.entries[word.en]?.association || ['','','','',''];
+    inputHTML = `<div style="margin-bottom:14px;text-align:center;font-size:13px;color:#b8b8b8;">输入 5 个与 <strong style="color:#2d2d2d;">${word.en}</strong> 相关的单词</div>
+      ${[0,1,2,3,4].map(i => `<div class="form-group"><label>联想词 ${i+1}</label><input class="input-field assoc-input" type="text" value="${sv[i]}" placeholder="输入相关英语单词" data-idx="${i}"></div>`).join('')}`;
+  } else {
+    const sel = state.entries[word.en]?.emoji || '';
+    inputHTML = `<div style="text-align:center;margin-bottom:14px;font-size:13px;color:#b8b8b8;">选择一个 Emoji 代表 <strong style="color:#2d2d2d;">${word.en}</strong></div>
+      <div class="emoji-row">
+        <div class="emoji-display ${sel?'filled':''}" id="emojiDisplay">${sel||'?'}</div>
+        <button class="emoji-btn" id="openEmojiBtn">选择 Emoji</button>
+      </div>`;
+  }
+
+  $app.innerHTML = `
+    <div class="card">
+      <div class="progress-bar">
+        <button class="btn-exit" id="exitBtn">← 退出</button>
+        <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <span class="mode-badge ${isAssoc?'association':'emoji'}">${current}/${total}</span>
+      </div>
+      <div class="word-card">
+        <div class="en">${word.en}</div>
+        ${defHTML}
+        <div class="zh">${word.zh}</div>
+      </div>
+      <form id="learningForm">
+        ${inputHTML}
+        <button type="submit" class="btn-primary">提交</button>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('exitBtn').addEventListener('click', () => {
+    saveState(state); state = defaultState(); clearState(); render();
+  });
+
+  if (!isAssoc) {
+    document.getElementById('openEmojiBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      openEmojiPicker((unicode) => {
+        document.getElementById('emojiDisplay').textContent = unicode;
+        document.getElementById('emojiDisplay').classList.add('filled');
+        state.entries[word.en] = state.entries[word.en] || {};
+        state.entries[word.en].emoji = unicode;
+        saveState(state);
+      });
+    });
+  }
+
+  document.getElementById('learningForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (isAssoc) {
+      const inputs = document.querySelectorAll('.assoc-input');
+      const words = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+      if (words.length < 5) { alert('请填写全部 5 个联想词'); return; }
+      state.entries[word.en] = { association: words };
+    } else {
+      if (!state.entries[word.en]?.emoji) { alert('请选择一个 Emoji'); return; }
+    }
+    saveState(state);
+    state.currentIdx++;
+    if (state.currentIdx >= state.wordList.length) {
+      state.phase = 'review'; state.reviewIdx = 0; state.reviewResults = []; state.wordList = shuffle(state.wordList);
+      saveState(state); render();
+    } else { saveState(state); render(); }
+  });
+}
+
+/* ============ REVIEW ============ */
+function renderReview() {
+  const word = state.wordList[state.reviewIdx];
+  const total = state.wordList.length;
+  const current = state.reviewIdx + 1;
+  const progress = (current / total) * 100;
+  const entry = state.entries[word.en];
+  const isAssoc = state.mode === 'association';
+
+  if (!entry || (isAssoc && !entry.association) || (!isAssoc && !entry.emoji)) {
+    state.reviewIdx++;
+    if (state.reviewIdx >= total) { state.phase = 'done'; saveState(state); render(); } else render();
+    return;
+  }
+
+  const correct = word.en;
+  const others = state.wordList.filter(w => w.en !== correct).map(w => w.en).sort(() => Math.random() - 0.5).slice(0, 3);
+  const options = shuffle([correct, ...others]);
+
+  const clue = isAssoc
+    ? `<div class="clue-area"><div class="label">你的联想词</div><div class="clue-words">${entry.association.map(w => `<span>${w}</span>`).join('')}</div></div>`
+    : `<div class="clue-area"><div class="label">你选的 Emoji</div><div class="clue-emoji">${entry.emoji}</div></div>`;
+
+  $app.innerHTML = `
+    <div class="card">
+      <div class="progress-bar">
+        <button class="btn-exit" id="exitBtn">← 退出</button>
+        <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <span class="mode-badge ${isAssoc?'association':'emoji'}">${current}/${total}</span>
+      </div>
+      ${clue}
+      <div style="text-align:center;margin-bottom:18px;font-size:15px;font-weight:600;">哪个词对应这个联想？</div>
+      <div class="options">${options.map(o => `<button class="option-btn" data-word="${o}" ${state.reviewResults[state.reviewIdx]?'disabled':''}>${o}</button>`).join('')}</div>
+      <div id="fb" class="${state.reviewResults[state.reviewIdx]?'':'hidden'}" style="margin-top:16px;text-align:center;">
+        ${state.reviewResults[state.reviewIdx] ? (state.reviewResults[state.reviewIdx].correct ? '<span style="color:#9bb88b;font-weight:600;font-size:16px;">✓ 正确</span>' : `<span style="color:#d49595;font-weight:600;font-size:16px;">✗ 正确答案是 <strong style="color:#2d2d2d;">${correct}</strong></span>`) : ''}
+        <br>
+        <button class="btn-primary" id="nextBtn" style="margin-top:12px;width:auto;padding:10px 32px;">${state.reviewIdx < total-1 ? '下一题' : '查看结果'}</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('exitBtn').addEventListener('click', () => {
+    saveState(state); state = defaultState(); clearState(); render();
+  });
+
+  if (!state.reviewResults[state.reviewIdx]) {
+    document.querySelectorAll('.option-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const chosen = btn.dataset.word;
+        const ok = chosen === correct;
+        document.querySelectorAll('.option-btn').forEach(b => {
+          b.disabled = true;
+          if (b.dataset.word === correct) b.classList.add('correct');
+          else if (b.dataset.word === chosen && !ok) b.classList.add('wrong');
+        });
+        state.reviewResults[state.reviewIdx] = { correct: ok, chosen, answer: correct };
+        saveState(state);
+        document.getElementById('fb').classList.remove('hidden');
+        document.getElementById('fb').innerHTML = `
+          ${ok ? '<span style="color:#9bb88b;font-weight:600;font-size:16px;">✓ 正确</span>' : `<span style="color:#d49595;font-weight:600;font-size:16px;">✗ 正确答案是 <strong style="color:#2d2d2d;">${correct}</strong></span>`}
+          <br>
+          <button class="btn-primary" id="nextBtn" style="margin-top:12px;width:auto;padding:10px 32px;">${state.reviewIdx < total-1 ? '下一题' : '查看结果'}</button>
+        `;
+        document.getElementById('nextBtn').addEventListener('click', nextReview);
+      });
+    });
+  } else {
+    document.getElementById('nextBtn').addEventListener('click', nextReview);
+  }
+}
+
+function nextReview() {
+  state.reviewIdx++;
+  if (state.reviewIdx >= state.wordList.length) { state.phase = 'done'; saveState(state); render(); }
+  else { saveState(state); render(); }
+}
+
+/* ============ RESULT ============ */
+function renderResult() {
+  const results = state.reviewResults;
+  const correctCount = results.filter(r => r && r.correct).length;
+  const total = results.length;
+  const pct = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+  const isAssoc = state.mode === 'association';
+
+  stats = loadStats() || defaultStats();
+  stats.totalWords = (stats.totalWords || 0) + state.wordList.length;
+  saveStats(stats);
+
+  const items = state.wordList.map(w => {
+    const r = results.find(res => res && res.answer === w.en);
+    return { word: w, result: r };
+  }).filter(i => i.result);
+
+  $app.innerHTML = `
+    <div class="card">
+      <div style="text-align:center;margin-bottom:4px;"><span class="mode-badge ${isAssoc?'association':'emoji'}">${isAssoc?'联想词':'Emoji'}模式</span></div>
+      <div class="result-score"><div class="score-num">${pct}%</div><div class="score-label">${correctCount} / ${total} 正确</div></div>
+      <div class="result-detail">${items.map(i => `<div class="result-item"><span class="ri-word">${i.word.en} <span class="ri-zh">${i.word.zh}</span></span><span class="ri-status">${i.result.correct?'✅':'❌'}</span></div>`).join('')}</div>
+      <div class="result-actions"><button class="btn-primary" data-action="retry">再学一轮</button><button class="btn-secondary" data-action="home">首页</button></div>
+    </div>
+  `;
+  $app.querySelector('[data-action="retry"]').addEventListener('click', () => startMode(state.mode));
+  $app.querySelector('[data-action="home"]').addEventListener('click', () => { state = defaultState(); clearState(); render(); });
+}
+
+render();
+</script>
+</body>
+</html>
