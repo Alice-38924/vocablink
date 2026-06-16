@@ -285,14 +285,37 @@ const TOEFL_WORDS = [
   {en:'virtual',zh:'虚拟的'},{en:'visible',zh:'可见的'},{en:'vital',zh:'至关重要的'},{en:'vulnerable',zh:'脆弱的'},{en:'widespread',zh:'广泛的'},
   {en:'withstand',zh:'承受'},{en:'yield',zh:'产出'},
 ];
-const USERS_KEY='vocabUsers'; const BOOKS_KEY='vocabBooks'; const DEF_KEY='vocabDefCache';
+const API_BASE = 'http://localhost:3000/api';
+const DEF_KEY='vocabDefCache';
+
+/* ============ API HELPERS ============ */
+function getToken() { return localStorage.getItem('vocabToken'); }
+function setToken(t) { localStorage.setItem('vocabToken', t); }
+function clearToken() { localStorage.removeItem('vocabToken'); localStorage.removeItem('vocabCurrentUser'); }
+
+function jwtUser(token) {
+  if (!token) return null;
+  try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return null; }
+}
+
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  const t = getToken();
+  if (t) headers['Authorization'] = 'Bearer ' + t;
+  const res = await fetch(API_BASE + path, { ...opts, headers });
+  const d = await res.json();
+  if (!res.ok) throw new Error(d.error || '请求失败');
+  return d;
+}
+const apiGet = p => api(p);
+const apiPost = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b) });
+const apiPut = (p, b) => api(p, { method: 'PUT', body: JSON.stringify(b) });
+const apiDel = p => api(p, { method: 'DELETE' });
 
 /* ============ HELPERS ============ */
 function shuffle(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]}return b}
 function loadJ(k,d){try{const r=localStorage.getItem(k);return r?JSON.parse(r):d}catch{return d}}
 function saveJ(k,v){localStorage.setItem(k,JSON.stringify(v))}
-function hash(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h.toString(36)}
-function genCode(){return String(Math.floor(100000+Math.random()*900000))}
 function getToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function maskEmail(e){const [n,d]=e.split('@');return n[0]+'***@'+d}
 
@@ -327,48 +350,79 @@ async function sendResetEmail(toEmail, code, username) {
   }
 }
 
-/* ============ USERS ============ */
-function loadUsers(){return loadJ(USERS_KEY,{})}
-function saveUsers(u){saveJ(USERS_KEY,u)}
-function userExists(n){return!!loadUsers()[n]}
-function registerUser(n,p,e){
-  const u=loadUsers();
-  if(u[n])return false;
-  u[n]={password:hash(p),email:e,createdAt:getToday()};
-  saveUsers(u);initUserData(n);return true;
+/* ============ USERS (server-side) ============ */
+async function apiRegister(n, p, e) {
+  const d = await apiPost('/register', { username: n, password: p, email: e });
+  setToken(d.token);
+  currentUser = d.username;
+  localStorage.setItem('vocabCurrentUser', d.username);
 }
-function checkPassword(n,p){const u=loadUsers();return u[n]&&u[n].password===hash(p)}
-function getUserEmail(n){const u=loadUsers();return u[n]?u[n].email:null}
-function setPassword(n,p){const u=loadUsers();if(!u[n])return;u[n].password=hash(p);saveUsers(u)}
-function setResetCode(n,c){const u=loadUsers();if(!u[n])return;u[n].resetCode=c;u[n].resetExp=getToday();saveUsers(u)}
-function getResetCode(n){const u=loadUsers();return u[n]?u[n].resetCode:null}
-function clearResetCode(n){const u=loadUsers();if(u[n]){delete u[n].resetCode;delete u[n].resetExp;saveUsers(u)}}
+async function apiLogin(n, p) {
+  const d = await apiPost('/login', { username: n, password: p });
+  setToken(d.token);
+  currentUser = d.username;
+  localStorage.setItem('vocabCurrentUser', d.username);
+}
+async function apiGetUserEmail(n) {
+  const d = await apiPost('/forgot-password', { username: n });
+  return d;
+}
+async function apiSendResetCode(n) {
+  const d = await apiPost('/forgot-password', { username: n });
+  return d; // { email, maskedEmail, code }
+}
+async function apiResetPassword(n, code, newPwd) {
+  await apiPost('/reset-password', { username: n, code, newPassword: newPwd });
+}
 
-/* ============ USER DATA (stats + word progress) ============ */
-function userDataKey(n){return'vocabData_'+n}
-function loadUserData(n){return loadJ(userDataKey(n),null)}
-function saveUserData(n,d){saveJ(userDataKey(n),d)}
-function initUserData(n){
-  let d=loadUserData(n);
-  if(!d)d={};
-  if(!d.stats)d.stats={checkInDates:[],totalWords:0,totalSessions:0};
-  if(!d.wordProgress)d.wordProgress={};
-  if(!d.bookProgress)d.bookProgress={};
-  saveUserData(n,d);return d;
+/* ============ USER DATA (server-side) ============ */
+let _userDataCache = null;
+async function fetchUserData() {
+  _userDataCache = await apiGet('/user-data');
+  if (!_userDataCache.stats) _userDataCache.stats = { checkInDates: [], totalWords: 0, totalSessions: 0 };
+  if (!_userDataCache.wordProgress) _userDataCache.wordProgress = {};
+  if (!_userDataCache.bookProgress) _userDataCache.bookProgress = {};
+  if (!_userDataCache.savedState) _userDataCache.savedState = null;
+  return _userDataCache;
 }
-function getStats(n){const d=initUserData(n);return d.stats}
-function saveStats(n,s){const d=initUserData(n);d.stats=s;saveUserData(n,d)}
-function getWordProgress(n){const d=initUserData(n);return d.wordProgress}
-function setWordProgress(n,wp){const d=initUserData(n);d.wordProgress=wp;saveUserData(n,d)}
+async function saveUserData() {
+  if (!_userDataCache) return;
+  await apiPut('/user-data', _userDataCache);
+}
+async function getStats() {
+  const d = await fetchUserData();
+  return d.stats;
+}
+async function saveStats(s) {
+  const d = await fetchUserData();
+  d.stats = s;
+  await apiPut('/user-data', d);
+  _userDataCache = d;
+}
+async function getWordProgress() {
+  const d = await fetchUserData();
+  return d.wordProgress;
+}
+async function setWordProgress(wp) {
+  const d = await fetchUserData();
+  d.wordProgress = wp;
+  await apiPut('/user-data', d);
+  _userDataCache = d;
+}
+async function _saveSession() {
+  if (!currentUser) return;
+  const d = await fetchUserData();
+  d.savedState = state;
+  await apiPut('/user-data', d);
+  _userDataCache = d;
+}
 
-/* ============ BOOKS ============ */
-function loadBooks(){
-  let b=loadJ(BOOKS_KEY,null);
-  if(!b){b={};b[DEFAULT_BOOK_NAME]={words:[...TOEFL_WORDS],isDefault:true};saveJ(BOOKS_KEY,b)}
-  else if(!b[DEFAULT_BOOK_NAME]){b[DEFAULT_BOOK_NAME]={words:[...TOEFL_WORDS],isDefault:true};saveJ(BOOKS_KEY,b)}
-  return b;
+/* ============ BOOKS (server-side) ============ */
+let _booksCache = null;
+async function fetchBooks() {
+  _booksCache = await apiGet('/books');
+  return _booksCache;
 }
-function saveBooks(b){saveJ(BOOKS_KEY,b)}
 
 /* ============ DEFINITION CACHE ============ */
 function getCachedDef(w){const c=loadJ(DEF_KEY,{});return c[w]||null}
@@ -386,16 +440,25 @@ function fmtDef(d){
 }
 
 /* ============ STATE ============ */
-let currentUser=loadJ('vocabCurrentUser',null);
+let currentUser = jwtUser(getToken());
 const STATE_KEY='vocabLinkApp';
 
 function defaultState(){return{mode:null,phase:null,wordList:[],currentIdx:0,reviewIdx:0,entries:{},reviewResults:[],wordCount:10,selectedBook:DEFAULT_BOOK_NAME}}
 
-// Resume saved session per user
 let state=defaultState();
-let savedState=currentUser?loadUserData(currentUser)?.savedState:null;
-if(savedState&&savedState.phase&&savedState.phase!=='done'){state=savedState}
-else{state=defaultState()}
+
+// Async resume on init
+(async () => {
+  if (currentUser) {
+    try {
+      const d = await fetchUserData();
+      if (d.savedState && d.savedState.phase && d.savedState.phase !== 'done') state = d.savedState;
+    } catch {}
+    render();
+  } else {
+    render();
+  }
+})();
 
 const $app=document.getElementById('app');
 const $header=document.getElementById('mainHeader');
@@ -411,23 +474,19 @@ $emojiModal.addEventListener('click',e=>{if(e.target===$emojiModal)$emojiModal.c
 function openEmojiPicker(cb){_emojiCb=cb;$emojiModal.classList.add('open')}
 
 /* ============ AUTH ============ */
-function login(n,p){
-  if(!userExists(n)||!checkPassword(n,p))return false;
-  currentUser=n;saveJ('vocabCurrentUser',n);initUserData(n);
-  state=defaultState();
-  savedState=loadUserData(n)?.savedState;
-  if(savedState&&savedState.phase&&savedState.phase!=='done')state=savedState;
-  render();return true;
+async function login(n, p) {
+  try {
+    await apiLogin(n, p);
+    state = defaultState();
+    const d = await fetchUserData();
+    if (d.savedState && d.savedState.phase && d.savedState.phase !== 'done') state = d.savedState;
+    render(); return true;
+  } catch { return false; }
 }
 function logout(){
-  currentUser=null;saveJ('vocabCurrentUser',null);state=defaultState();
+  clearToken(); currentUser=null; state=defaultState();
   document.querySelector('#mainHeader').style.display='none';
   render();
-}
-function _saveSession(){
-  if(!currentUser)return;
-  const d=initUserData(currentUser);
-  d.savedState=state;saveUserData(currentUser,d);
 }
 
 /* ============ RENDER ============ */
@@ -452,10 +511,10 @@ function renderAuthLogin(err){
     '<div class="field"><label>密码</label><input id="loginPass" type="password" placeholder="输入密码"></div>'+
     '<button class="btn-auth" id="loginBtn">登录</button>'+
     '<div class="auth-links">还没有账号？<a id="goRegister">注册</a> &nbsp;·&nbsp; <a id="goReset">忘记密码</a></div></div></div>';
-  document.getElementById('loginBtn').addEventListener('click',()=>{
+  document.getElementById('loginBtn').addEventListener('click',async ()=>{
     const n=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value;
-    if(!n||!p){renderAuthLogin('请填写用户名和密码');return}
-    if(!login(n,p))renderAuthLogin('用户名或密码错误');
+    if(!n||!p)return renderAuthLogin('请填写用户名和密码');
+    if(!(await login(n,p)))renderAuthLogin('用户名或密码错误');
   });
   document.getElementById('goRegister').addEventListener('click',renderAuthRegister);
   document.getElementById('goReset').addEventListener('click',renderAuthReset1);
@@ -469,7 +528,7 @@ function renderAuthRegister(err){
     '<div class="field"><label>确认密码</label><input id="regPass2" type="password" placeholder="再次输入密码"></div>'+
     '<button class="btn-auth" id="regBtn">注册</button>'+
     '<div class="auth-links">已有账号？<a id="goLogin">登录</a></div></div></div>';
-  document.getElementById('regBtn').addEventListener('click',()=>{
+  document.getElementById('regBtn').addEventListener('click',async ()=>{
     const n=document.getElementById('regUser').value.trim();
     const e=document.getElementById('regEmail').value.trim();
     const p=document.getElementById('regPass').value;
@@ -478,9 +537,8 @@ function renderAuthRegister(err){
     if(p!==p2)return renderAuthRegister('两次密码不一致');
     if(p.length<4)return renderAuthRegister('密码至少 4 位');
     if(!e.includes('@'))return renderAuthRegister('邮箱格式不正确');
-    if(userExists(n))return renderAuthRegister('用户名已存在');
-    registerUser(n,p,e);
-    login(n,p);
+    try{await apiRegister(n,p,e);render()}
+    catch(err){renderAuthRegister(err.message)}
   });
   document.getElementById('goLogin').addEventListener('click',renderAuthLogin);
 }
@@ -493,21 +551,20 @@ function renderAuthReset1(err){
     '<div class="auth-links"><a id="goLogin2">返回登录</a></div></div></div>';
   document.getElementById('resetStep1Btn').addEventListener('click',async ()=>{
     const n=document.getElementById('resetUser').value.trim();
-    if(!n||!userExists(n))return renderAuthReset1('用户不存在');
-    const email=getUserEmail(n);
-    if(!email)return renderAuthReset1('该用户未绑定邮箱');
-    const code=genCode();setResetCode(n,code);
-    renderAuthReset2(n,email);
-    // Try to send email via EmailJS
-    const statusEl=document.getElementById('resetSendStatus');
-    if(statusEl){
-      const ok=await sendResetEmail(email,code,n);
-      if(ok){
-        statusEl.innerHTML='✅ 验证码已发送到你的邮箱 <strong>'+maskEmail(email)+'</strong>，请查收';
-      }else{
-        statusEl.innerHTML='⚠️ 邮件发送失败（未配置 EmailJS 凭证）。下面是你的重置码：<div class="code-display" style="margin-top:10px;font-size:32px;font-weight:700;letter-spacing:8px;color:#c9a96e;padding:16px;background:#fafaf9;border-radius:12px;border:1.5px dashed #e8e2dc">'+code+'</div><div class="code-note" style="font-size:12px;color:#b8b8b8;margin-top:8px">请手动记录此码</div>';
+    if(!n||!n.trim())return renderAuthReset1('请输入用户名');
+    try{
+      const {email, maskedEmail, code}=await apiSendResetCode(n);
+      renderAuthReset2(n,email);
+      const statusEl=document.getElementById('resetSendStatus');
+      if(statusEl){
+        const ok=await sendResetEmail(email,code,n);
+        if(ok){
+          statusEl.innerHTML='✅ 验证码已发送到你的邮箱 <strong>'+maskEmail(email)+'</strong>，请查收';
+        }else{
+          statusEl.innerHTML='⚠️ 邮件发送失败。下面是你的重置码：<div class="code-display" style="margin-top:10px;font-size:32px;font-weight:700;letter-spacing:8px;color:#c9a96e;padding:16px;background:#fafaf9;border-radius:12px;border:1.5px dashed #e8e2dc">'+code+'</div><div class="code-note" style="font-size:12px;color:#b8b8b8;margin-top:8px">请手动记录此码</div>';
+        }
       }
-    }
+    }catch(err){renderAuthReset1(err.message)}
   });
   document.getElementById('goLogin2').addEventListener('click',renderAuthLogin);
 }
@@ -522,74 +579,82 @@ function renderAuthReset2(user,email,err){
     '<div class="field"><label>确认新密码</label><input id="resetNewPass2" type="password" placeholder="再次输入新密码"></div>'+
     '<button class="btn-auth" id="resetStep2Btn">重置密码</button>'+
     '<div class="auth-links"><a id="goLogin3">返回登录</a></div></div></div>';
-  document.getElementById('resetStep2Btn').addEventListener('click',()=>{
+  document.getElementById('resetStep2Btn').addEventListener('click',async ()=>{
     const rc=document.getElementById('resetCode').value.trim();
     const np=document.getElementById('resetNewPass').value;
     const np2=document.getElementById('resetNewPass2').value;
-    const storedCode=getResetCode(user);
-    if(rc!==storedCode)return renderAuthReset2(user,email,'重置码错误');
     if(!np||np.length<4)return renderAuthReset2(user,email,'密码至少 4 位');
     if(np!==np2)return renderAuthReset2(user,email,'两次密码不一致');
-    setPassword(user,np);clearResetCode(user);
-    alert('密码重置成功，请登录');
-    renderAuthLogin();
+    try{
+      await apiResetPassword(user,rc,np);
+      alert('密码重置成功，请登录');
+      renderAuthLogin();
+    }catch(err){renderAuthReset2(user,email,err.message)}
   });
   document.getElementById('goLogin3').addEventListener('click',renderAuthLogin);
 }
 
 // ==================== HOME ====================
 let _mgmtViewing=null;
-function renderHome(){
-  const stats=getStats(currentUser);
-  const today=getToday();
-  const checkedInToday=stats.checkInDates.includes(today);
-  const streak=calcStreak(stats.checkInDates);
-  const tw=stats.totalWords||0;const ts=stats.totalSessions||0;
-  const books=loadBooks();
-  const bNames=Object.keys(books);
-  const curBook=state.selectedBook&&books[state.selectedBook]?state.selectedBook:DEFAULT_BOOK_NAME;
-  const cbw=books[curBook]?books[curBook].words.length:0;
+async function renderHome(){
+  $app.innerHTML='<div class="card" style="text-align:center;padding:40px;color:#b8b8b8">加载中...</div>';
+  try {
+    const [stats, books, userData] = await Promise.all([getStats(), fetchBooks(), fetchUserData()]);
+    const today = getToday();
+    const checkedInToday = stats.checkInDates.includes(today);
+    const streak = calcStreak(stats.checkInDates);
+    const tw = stats.totalWords || 0; const ts = stats.totalSessions || 0;
+    const bNames = Object.keys(books);
+    const curBook = state.selectedBook && books[state.selectedBook] ? state.selectedBook : DEFAULT_BOOK_NAME;
+    const cbw = books[curBook] ? books[curBook].words.length : 0;
 
-  const now=new Date(),dow=now.getDay();
-  const mon=new Date(now);mon.setDate(now.getDate()-((dow+6)%7));
-  const calDays=[];
-  for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');calDays.push({label:['日','一','二','三','四','五','六'][d.getDay()],checked:stats.checkInDates.includes(ds),today:ds===today,future:d>now})}
+    const now = new Date(), dow = now.getDay();
+    const mon = new Date(now); mon.setDate(now.getDate() - ((dow + 6) % 7));
+    const calDays = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); const ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); calDays.push({ label: ['日', '一', '二', '三', '四', '五', '六'][d.getDay()], checked: stats.checkInDates.includes(ds), today: ds === today, future: d > now }) }
 
-  $app.innerHTML=
-    '<div class="stats-row"><div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value">'+streak+'</div><div class="stat-label">连续学习天数</div></div><div class="stat-card"><div class="stat-icon">📖</div><div class="stat-value">'+tw+'</div><div class="stat-label">累计掌握单词</div></div><div class="stat-card"><div class="stat-icon">📅</div><div class="stat-value">'+ts+'</div><div class="stat-label">学习次数</div></div></div>'+
-    '<div class="week-calendar">'+calDays.map(d=>'<div class="cal-day"><span class="cal-label">'+d.label+'</span><span class="cal-dot '+(d.checked?'filled':'')+' '+(d.today?'today':'')+' '+(d.future?'future':'')+'">'+(d.checked?'✓':d.today?'今':'')+'</span></div>').join('')+'</div>'+
-    '<div class="checkin-area"><div class="ci-left"><span class="ci-icon">'+(checkedInToday?'✅':'📌')+'</span><div><div class="ci-text">'+(checkedInToday?'今日已打卡':'今天还没有学习')+'</div><div class="ci-sub">'+(checkedInToday?'继续保持！':'开始学习自动打卡')+'</div></div></div><button class="btn-checkin '+(checkedInToday?'done':'active')+'" id="checkinBtn"'+(checkedInToday?'disabled':'')+'>'+(checkedInToday?'已打卡':'打卡')+'</button></div>'+
-    '<div class="book-bar"><label>📖 词汇书</label><select id="bookSelect">'+bNames.map(n=>'<option value="'+n+'"'+(n===curBook?'selected':'')+'>'+n+' ('+books[n].words.length+'词)</option>').join('')+'</select><button class="btn-sm" id="manageBooksBtn">管理</button></div>'+
-    '<div class="word-count-bar"><label>每次学习</label><select id="wordCountSelect">'+[5,10,15,20,25,30].map(n=>'<option value="'+n+'"'+(state.wordCount===n?'selected':'')+'>'+n+' 个词</option>').join('')+'<option value="'+cbw+'"'+(state.wordCount===cbw?'selected':'')+'>全部 '+cbw+' 词</option></select><span class="total-note">共 '+cbw+' 词</span></div>'+
-    '<div class="mode-grid"><div class="mode-card" data-action="start-association"><div class="icon">📝</div><div class="label">联想词模式</div><div class="desc">输入 5 个相关单词<br>复习时根据联想词回忆原词</div></div><div class="mode-card" data-action="start-emoji"><div class="icon">😊</div><div class="label">Emoji 模式</div><div class="desc">为单词选一个 Emoji<br>复习时根据 Emoji 回忆原词</div></div></div>'+
-    '<div class="progress-link"><a id="viewProgress">📊 查看我的单词进度</a></div>'+
-    (loadUserData(currentUser)?.savedState?.phase&&loadUserData(currentUser).savedState.phase!=='done'?'<div style="margin-top:12px"><button class="btn-secondary" data-action="continue" style="width:100%">继续上次学习</button></div>':'');
+    $app.innerHTML =
+      '<div class="stats-row"><div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value">' + streak + '</div><div class="stat-label">连续学习天数</div></div><div class="stat-card"><div class="stat-icon">📖</div><div class="stat-value">' + tw + '</div><div class="stat-label">累计掌握单词</div></div><div class="stat-card"><div class="stat-icon">📅</div><div class="stat-value">' + ts + '</div><div class="stat-label">学习次数</div></div></div>' +
+      '<div class="week-calendar">' + calDays.map(d => '<div class="cal-day"><span class="cal-label">' + d.label + '</span><span class="cal-dot ' + (d.checked ? 'filled' : '') + ' ' + (d.today ? 'today' : '') + ' ' + (d.future ? 'future' : '') + '">' + (d.checked ? '✓' : d.today ? '今' : '') + '</span></div>').join('') + '</div>' +
+      '<div class="checkin-area"><div class="ci-left"><span class="ci-icon">' + (checkedInToday ? '✅' : '📌') + '</span><div><div class="ci-text">' + (checkedInToday ? '今日已打卡' : '今天还没有学习') + '</div><div class="ci-sub">' + (checkedInToday ? '继续保持！' : '开始学习自动打卡') + '</div></div></div><button class="btn-checkin ' + (checkedInToday ? 'done' : 'active') + '" id="checkinBtn"' + (checkedInToday ? 'disabled' : '') + '>' + (checkedInToday ? '已打卡' : '打卡') + '</button></div>' +
+      '<div class="book-bar"><label>📖 词汇书</label><select id="bookSelect">' + bNames.map(n => '<option value="' + n + '"' + (n === curBook ? 'selected' : '') + '>' + n + ' (' + books[n].words.length + '词)</option>').join('') + '</select><button class="btn-sm" id="manageBooksBtn">管理</button></div>' +
+      '<div class="word-count-bar"><label>每次学习</label><select id="wordCountSelect">' + [5, 10, 15, 20, 25, 30].map(n => '<option value="' + n + '"' + (state.wordCount === n ? 'selected' : '') + '>' + n + ' 个词</option>').join('') + '<option value="' + cbw + '"' + (state.wordCount === cbw ? 'selected' : '') + '>全部 ' + cbw + ' 词</option></select><span class="total-note">共 ' + cbw + ' 词</span></div>' +
+      '<div class="mode-grid"><div class="mode-card" data-action="start-association"><div class="icon">📝</div><div class="label">联想词模式</div><div class="desc">输入 5 个相关单词<br>复习时根据联想词回忆原词</div></div><div class="mode-card" data-action="start-emoji"><div class="icon">😊</div><div class="label">Emoji 模式</div><div class="desc">为单词选一个 Emoji<br>复习时根据 Emoji 回忆原词</div></div></div>' +
+      '<div class="progress-link"><a id="viewProgress">📊 查看我的单词进度</a></div>' +
+      (userData.savedState && userData.savedState.phase && userData.savedState.phase !== 'done' ? '<div style="margin-top:12px"><button class="btn-secondary" data-action="continue" style="width:100%">继续上次学习</button></div>' : '');
 
-  document.getElementById('bookSelect').addEventListener('change',e=>{state.selectedBook=e.target.value;_saveSession();renderHome()});
-  document.getElementById('manageBooksBtn').addEventListener('click',()=>{_mgmtViewing=null;renderBookManager()});
-  document.getElementById('wordCountSelect').addEventListener('change',e=>{state.wordCount=parseInt(e.target.value);_saveSession()});
-  document.getElementById('checkinBtn').addEventListener('click',()=>{
-    if(!checkedInToday){const s=getStats(currentUser);s.checkInDates.push(today);s.totalSessions=(s.totalSessions||0)+1;saveStats(currentUser,s);renderHome()}
-  });
-  document.getElementById('viewProgress').addEventListener('click',renderWordProgress);
-  document.querySelectorAll('[data-action]').forEach(el=>{el.addEventListener('click',()=>{
-    const a=el.dataset.action;
-    if(a==='start-association')startMode('association');
-    else if(a==='start-emoji')startMode('emoji');
-    else if(a==='continue'){const sd=loadUserData(currentUser)?.savedState;if(sd){state=sd}_saveSession();render()}
-  })});
+    document.getElementById('bookSelect').addEventListener('change', e => { state.selectedBook = e.target.value; _saveSession(); renderHome() });
+    document.getElementById('manageBooksBtn').addEventListener('click', () => { _mgmtViewing = null; renderBookManager() });
+    document.getElementById('wordCountSelect').addEventListener('change', e => { state.wordCount = parseInt(e.target.value); _saveSession() });
+    document.getElementById('checkinBtn').addEventListener('click', async () => {
+      if (!checkedInToday) { const s = await getStats(); s.checkInDates.push(today); s.totalSessions = (s.totalSessions || 0) + 1; await saveStats(s); renderHome() }
+    });
+    document.getElementById('viewProgress').addEventListener('click', renderWordProgress);
+    document.querySelectorAll('[data-action]').forEach(el => {
+      el.addEventListener('click', async () => {
+        const a = el.dataset.action;
+        if (a === 'start-association') startMode('association');
+        else if (a === 'start-emoji') startMode('emoji');
+        else if (a === 'continue') { const d = await fetchUserData(); if (d.savedState) { state = d.savedState } _saveSession(); render() }
+      })
+    });
+  } catch (e) {
+    $app.innerHTML = '<div class="card" style="text-align:center;padding:40px;color:#d49595">加载失败: ' + e.message + '</div>';
+  }
 }
 
 // ==================== WORD PROGRESS ====================
-function renderWordProgress(){
-  const wp=getWordProgress(currentUser);
-  const total=Object.keys(wp).length;
-  const mastered=Object.values(wp).filter(w=>w.total>=3&&w.correct/(w.total||1)>=0.7).length; // studied >=3 times + >=70% correct
-  const learning=total-mastered;
-  const wordArr=Object.entries(wp).map(([en,p])=>({en,zh:p.zh||'',total:p.total||0,correct:p.correct||0,wrong:p.wrong||0,acc:((p.correct||0)/((p.total||1))*100).toFixed(0)}));
-  wordArr.sort((a,b)=>b.total-a.total);
-  const books=loadBooks();const allWords=books[state.selectedBook]?.words||[];
-  const withZh=wordArr.map(w=>{const f=allWords.find(x=>x.en===w.en);return{...w,zh:f?f.zh:''}});
+async function renderWordProgress(){
+  $app.innerHTML='<div class="card" style="text-align:center;padding:40px;color:#b8b8b8">加载中...</div>';
+  try {
+    const [wp, books] = await Promise.all([getWordProgress(), fetchBooks()]);
+    const total = Object.keys(wp).length;
+    const mastered = Object.values(wp).filter(w => w.total >= 3 && w.correct / (w.total || 1) >= 0.7).length;
+    const learning = total - mastered;
+    const wordArr = Object.entries(wp).map(([en, p]) => ({ en, zh: p.zh || '', total: p.total || 0, correct: p.correct || 0, wrong: p.wrong || 0, acc: ((p.correct || 0) / ((p.total || 1)) * 100).toFixed(0) }));
+    wordArr.sort((a, b) => b.total - a.total);
+    const allWords = books[state.selectedBook]?.words || [];
+    const withZh = wordArr.map(w => { const f = allWords.find(x => x.en === w.en); return { ...w, zh: f ? f.zh : '' } });
 
   $app.innerHTML=
     '<div class="card"><div class="mgmt-header"><button class="btn-back" id="wpBack">← 返回</button><h3>📊 我的单词进度</h3></div>'+
@@ -609,49 +674,68 @@ function renderWordProgress(){
       el.style.display=(t.includes(q)||zh.includes(q))?'flex':'none';
     });
   });
+  } catch (e) {
+    $app.innerHTML = '<div class="card" style="text-align:center;padding:40px;color:#d49595">加载失败: ' + e.message + '</div>';
+  }
 }
 
 // ==================== BOOK MANAGER ====================
-function renderBookManager(){
-  const books=loadBooks();const names=Object.keys(books);
-  if(!_mgmtViewing){
-    $app.innerHTML='<div class="card"><div class="mgmt-header"><button class="btn-back" id="mgmtBack">← 返回</button><h3>我的词汇书</h3></div><div class="mgmt-add"><input id="newBookInput" placeholder="输入新词汇书名称"><button id="newBookBtn">新建</button></div><div class="mgmt-list">'+names.map(n=>'<div class="mgmt-item" data-book="'+n+'"><div class="mi-info"><div class="mi-title">'+(books[n].isDefault?'📖':'📓')+' '+n+'</div><div class="mi-sub">'+books[n].words.length+' 个词</div></div><div class="mi-actions"><button class="edit" data-action="view-book">编辑</button>'+(books[n].isDefault?'':'<button data-action="del-book">删除</button>')+'</div></div>').join('')+(names.length===0?'<div class="empty-note">还没有词汇书</div>':'')+'</div></div>';
-    document.getElementById('mgmtBack').addEventListener('click',()=>{_mgmtViewing=null;state.phase=null;render()});
-    document.getElementById('newBookBtn').addEventListener('click',()=>{
-      const inp=document.getElementById('newBookInput'),name=inp.value.trim();
-      if(!name)return alert('请输入名称');
-      if(books[name])return alert('已存在');
-      books[name]={words:[],isDefault:false};saveBooks(books);inp.value='';renderBookManager();
+async function renderBookManager(){
+  $app.innerHTML='<div class="card" style="text-align:center;padding:40px;color:#b8b8b8">加载中...</div>';
+  const books = await fetchBooks();
+  const names = Object.keys(books);
+  if (!_mgmtViewing) {
+    $app.innerHTML = '<div class="card"><div class="mgmt-header"><button class="btn-back" id="mgmtBack">← 返回</button><h3>我的词汇书</h3></div><div class="mgmt-add"><input id="newBookInput" placeholder="输入新词汇书名称"><button id="newBookBtn">新建</button></div><div class="mgmt-list">' + names.map(n => '<div class="mgmt-item" data-book="' + n + '"><div class="mi-info"><div class="mi-title">' + (books[n].isDefault ? '📖' : '📓') + ' ' + n + '</div><div class="mi-sub">' + books[n].words.length + ' 个词</div></div><div class="mi-actions"><button class="edit" data-action="view-book">编辑</button>' + (books[n].isDefault ? '' : '<button data-action="del-book">删除</button>') + '</div></div>').join('') + (names.length === 0 ? '<div class="empty-note">还没有词汇书</div>' : '') + '</div></div>';
+    document.getElementById('mgmtBack').addEventListener('click', () => { _mgmtViewing = null; state.phase = null; render() });
+    document.getElementById('newBookBtn').addEventListener('click', async () => {
+      const inp = document.getElementById('newBookInput'), name = inp.value.trim();
+      if (!name) return alert('请输入名称');
+      try { await apiPost('/books', { name }); inp.value = ''; renderBookManager(); }
+      catch (e) { alert(e.message) }
     });
-    document.querySelectorAll('[data-action="del-book"]').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();const n=el.closest('[data-book]').dataset.book;if(confirm('确定删除「'+n+'」？')){delete books[n];saveBooks(books);renderBookManager()}})});
-    document.querySelectorAll('[data-action="view-book"]').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();_mgmtViewing=el.closest('[data-book]').dataset.book;renderBookManager()})});
-    document.querySelectorAll('.mgmt-item').forEach(el=>{el.addEventListener('click',()=>{_mgmtViewing=el.dataset.book;renderBookManager()})});
-  }else{
-    const book=books[_mgmtViewing];if(!book){_mgmtViewing=null;renderBookManager();return}
-    $app.innerHTML='<div class="card"><div class="mgmt-header"><button class="btn-back" id="mgmtBack">← 返回</button><h3>'+(book.isDefault?'📖':'📓')+' '+_mgmtViewing+'</h3><span style="font-size:13px;color:#b8b8b8">'+book.words.length+' 词</span></div><div class="word-add-row"><input id="wordEn" placeholder="英文"><input id="wordZh" placeholder="中文"><button id="addWordBtn">添加</button></div><div class="word-list">'+(book.words.length===0?'<div class="empty-note">还没有单词</div>':book.words.map((w,i)=>'<div class="wl-item"><div><span class="wl-word">'+w.en+'</span><span class="wl-zh">'+w.zh+'</span></div>'+(book.isDefault?'':'<button class="wl-del" data-idx="'+i+'">✕</button>')+'</div>').join(''))+'</div>'+(book.isDefault?'<div style="font-size:12px;color:#d0d0d0;text-align:center;margin-top:12px">默认词汇书不可删除单词</div>':'')+'</div>';
-    document.getElementById('mgmtBack').addEventListener('click',()=>{_mgmtViewing=null;renderBookManager()});
-    document.getElementById('addWordBtn').addEventListener('click',()=>{
-      const en=document.getElementById('wordEn').value.trim(),zh=document.getElementById('wordZh').value.trim();
-      if(!en||!zh)return alert('请填写英文和中文');
-      const b=loadBooks();b[_mgmtViewing].words.push({en,zh});saveBooks(b);
-      document.getElementById('wordEn').value='';document.getElementById('wordZh').value='';renderBookManager();
+    document.querySelectorAll('[data-action="del-book"]').forEach(el => {
+      el.addEventListener('click', async e => {
+        e.stopPropagation(); const n = el.closest('[data-book]').dataset.book;
+        if (confirm('确定删除「' + n + '」？')) { try { await apiDel('/books/' + encodeURIComponent(n)); renderBookManager(); } catch (e) { alert(e.message) } }
+      })
     });
-    if(!book.isDefault){document.querySelectorAll('.wl-del').forEach(el=>{el.addEventListener('click',()=>{const idx=parseInt(el.dataset.idx);const b=loadBooks();b[_mgmtViewing].words.splice(idx,1);saveBooks(b);renderBookManager()})})}
+    document.querySelectorAll('[data-action="view-book"]').forEach(el => { el.addEventListener('click', e => { e.stopPropagation(); _mgmtViewing = el.closest('[data-book]').dataset.book; renderBookManager() }) });
+    document.querySelectorAll('.mgmt-item').forEach(el => { el.addEventListener('click', () => { _mgmtViewing = el.dataset.book; renderBookManager() }) });
+  } else {
+    const book = books[_mgmtViewing]; if (!book) { _mgmtViewing = null; renderBookManager(); return }
+    $app.innerHTML = '<div class="card"><div class="mgmt-header"><button class="btn-back" id="mgmtBack">← 返回</button><h3>' + (book.isDefault ? '📖' : '📓') + ' ' + _mgmtViewing + '</h3><span style="font-size:13px;color:#b8b8b8">' + book.words.length + ' 词</span></div><div class="word-add-row"><input id="wordEn" placeholder="英文"><input id="wordZh" placeholder="中文"><button id="addWordBtn">添加</button></div><div class="word-list">' + (book.words.length === 0 ? '<div class="empty-note">还没有单词</div>' : book.words.map((w, i) => '<div class="wl-item"><div><span class="wl-word">' + w.en + '</span><span class="wl-zh">' + w.zh + '</span></div>' + (book.isDefault ? '' : '<button class="wl-del" data-idx="' + i + '">✕</button>') + '</div>').join('')) + '</div>' + (book.isDefault ? '<div style="font-size:12px;color:#d0d0d0;text-align:center;margin-top:12px">默认词汇书不可删除单词</div>' : '') + '</div>';
+    document.getElementById('mgmtBack').addEventListener('click', () => { _mgmtViewing = null; renderBookManager() });
+    document.getElementById('addWordBtn').addEventListener('click', async () => {
+      const en = document.getElementById('wordEn').value.trim(), zh = document.getElementById('wordZh').value.trim();
+      if (!en || !zh) return alert('请填写英文和中文');
+      try { await apiPost('/books/' + encodeURIComponent(_mgmtViewing) + '/words', { en, zh }); document.getElementById('wordEn').value = ''; document.getElementById('wordZh').value = ''; renderBookManager(); }
+      catch (e) { alert(e.message) }
+    });
+    if (!book.isDefault) {
+      document.querySelectorAll('.wl-del').forEach(el => {
+        el.addEventListener('click', async () => {
+          const idx = parseInt(el.dataset.idx);
+          const w = book.words[idx];
+          try { await apiDel('/books/' + encodeURIComponent(_mgmtViewing) + '/words/' + encodeURIComponent(w.en)); renderBookManager(); }
+          catch (e) { alert(e.message) }
+        })
+      })
+    }
   }
 }
 
 // ==================== START MODE ====================
-function startMode(mode){
-  const books=loadBooks();
-  const bn=state.selectedBook&&books[state.selectedBook]?state.selectedBook:DEFAULT_BOOK_NAME;
-  const bw=books[bn].words;
-  const cnt=Math.min(state.wordCount||10,bw.length);
-  const sel=shuffle(bw).slice(0,cnt);
-  state=defaultState();state.mode=mode;state.phase='learning';state.wordList=sel;state.wordCount=cnt;state.selectedBook=bn;
-  const s=getStats(currentUser);
-  const t=getToday();
-  if(!s.checkInDates.includes(t)){s.checkInDates.push(t);s.totalSessions=(s.totalSessions||0)+1;saveStats(currentUser,s)}
-  _saveSession();render();
+async function startMode(mode){
+  const books = await fetchBooks();
+  const bn = state.selectedBook && books[state.selectedBook] ? state.selectedBook : DEFAULT_BOOK_NAME;
+  const bw = books[bn].words;
+  const cnt = Math.min(state.wordCount || 10, bw.length);
+  const sel = shuffle(bw).slice(0, cnt);
+  state = defaultState(); state.mode = mode; state.phase = 'learning'; state.wordList = sel; state.wordCount = cnt; state.selectedBook = bn;
+  const s = await getStats();
+  const t = getToday();
+  if (!s.checkInDates.includes(t)) { s.checkInDates.push(t); s.totalSessions = (s.totalSessions || 0) + 1; await saveStats(s) }
+  await _saveSession(); render();
 }
 
 // ==================== LEARNING ====================
@@ -672,11 +756,11 @@ function renderLearning(){
     ih='<div style="text-align:center;margin-bottom:14px;font-size:13px;color:#b8b8b8">选择一个 Emoji 代表 <strong style="color:#2d2d2d">'+word.en+'</strong></div><div class="emoji-row"><div class="emoji-display '+(sel?'filled':'')+'" id="emojiDisplay">'+(sel||'?')+'</div><button class="emoji-btn" id="openEmojiBtn">选择 Emoji</button></div>';
   }
   $app.innerHTML='<div class="card"><div class="progress-bar"><button class="btn-exit" id="exitBtn">← 退出</button><div class="progress-track"><div class="progress-fill" style="width:'+prg+'%"></div></div><span class="mode-badge '+(isAssoc?'association':'emoji')+'">'+cur+'/'+total+'</span></div><div class="word-card"><div class="en">'+word.en+'</div>'+dhtml+'<div class="zh">'+word.zh+'</div></div><form id="learningForm">'+ih+'<button type="submit" class="btn-primary">提交</button></form></div>';
-  document.getElementById('exitBtn').addEventListener('click',()=>{_saveSession();state=defaultState();render()});
+  document.getElementById('exitBtn').addEventListener('click',async ()=>{await _saveSession();state=defaultState();render()});
   if(!isAssoc){
-    document.getElementById('openEmojiBtn').addEventListener('click',e=>{e.preventDefault();openEmojiPicker(u=>{document.getElementById('emojiDisplay').textContent=u;document.getElementById('emojiDisplay').classList.add('filled');state.entries[word.en]=state.entries[word.en]||{};state.entries[word.en].emoji=u;_saveSession()})});
+    document.getElementById('openEmojiBtn').addEventListener('click',e=>{e.preventDefault();openEmojiPicker(async u=>{document.getElementById('emojiDisplay').textContent=u;document.getElementById('emojiDisplay').classList.add('filled');state.entries[word.en]=state.entries[word.en]||{};state.entries[word.en].emoji=u;await _saveSession()})});
   }
-  document.getElementById('learningForm').addEventListener('submit',e=>{
+  document.getElementById('learningForm').addEventListener('submit',async e=>{
     e.preventDefault();
     if(isAssoc){
       const inp=document.querySelectorAll('.assoc-input');
@@ -684,16 +768,15 @@ function renderLearning(){
       if(w.length<5)return alert('请填写全部 5 个联想词');
       state.entries[word.en]={association:w};
     }else{if(!state.entries[word.en]?.emoji)return alert('请选择一个 Emoji')}
-    // Update word progress
-    const wp=getWordProgress(currentUser);
+    const wp=await getWordProgress();
     if(!wp[word.en])wp[word.en]={zh:word.zh,total:0,correct:0,wrong:0,lastReview:''};
     wp[word.en].total=(wp[word.en].total||0)+1;
     wp[word.en].lastReview=getToday();
-    setWordProgress(currentUser,wp);
-    _saveSession();
+    await setWordProgress(wp);
+    await _saveSession();
     state.currentIdx++;
-    if(state.currentIdx>=state.wordList.length){state.phase='review';state.reviewIdx=0;state.reviewResults=[];state.wordList=shuffle(state.wordList);_saveSession();render()}
-    else{_saveSession();render()}
+    if(state.currentIdx>=state.wordList.length){state.phase='review';state.reviewIdx=0;state.reviewResults=[];state.wordList=shuffle(state.wordList);await _saveSession();render()}
+    else{await _saveSession();render()}
   });
 }
 
@@ -708,37 +791,36 @@ function renderReview(){
   const opts=shuffle([correct,...others]);
   const clue=isAssoc?'<div class="clue-area"><div class="label">你的联想词</div><div class="clue-words">'+entry.association.map(w=>'<span>'+w+'</span>').join('')+'</div></div>':'<div class="clue-area"><div class="label">你选的 Emoji</div><div class="clue-emoji">'+entry.emoji+'</div></div>';
   $app.innerHTML='<div class="card"><div class="progress-bar"><button class="btn-exit" id="exitBtn">← 退出</button><div class="progress-track"><div class="progress-fill" style="width:'+prg+'%"></div></div><span class="mode-badge '+(isAssoc?'association':'emoji')+'">'+cur+'/'+total+'</span></div>'+clue+'<div style="text-align:center;margin-bottom:18px;font-size:15px;font-weight:600">哪个词对应这个联想？</div><div class="options">'+opts.map(o=>'<button class="option-btn" data-word="'+o+'"'+(state.reviewResults[state.reviewIdx]?'disabled':'')+'>'+o+'</button>').join('')+'</div><div id="fb" class="'+(state.reviewResults[state.reviewIdx]?'':'hidden')+'" style="margin-top:16px;text-align:center">'+(state.reviewResults[state.reviewIdx]?(state.reviewResults[state.reviewIdx].correct?'<span style="color:#9bb88b;font-weight:600;font-size:16px">✓ 正确</span>':'<span style="color:#d49595;font-weight:600;font-size:16px">✗ 正确答案是 <strong style="color:#2d2d2d">'+correct+'</strong></span>'):'')+'<br><button class="btn-primary" id="nextBtn" style="margin-top:12px;width:auto;padding:10px 32px">'+(state.reviewIdx<total-1?'下一题':'查看结果')+'</button></div></div>';
-  document.getElementById('exitBtn').addEventListener('click',()=>{_saveSession();state=defaultState();render()});
+  document.getElementById('exitBtn').addEventListener('click',async ()=>{await _saveSession();state=defaultState();render()});
   if(!state.reviewResults[state.reviewIdx]){
-    document.querySelectorAll('.option-btn').forEach(btn=>{btn.addEventListener('click',()=>{
+    document.querySelectorAll('.option-btn').forEach(btn=>{btn.addEventListener('click',async ()=>{
       const chosen=btn.dataset.word,ok=chosen===correct;
       document.querySelectorAll('.option-btn').forEach(b=>{b.disabled=true;if(b.dataset.word===correct)b.classList.add('correct');else if(b.dataset.word===chosen&&!ok)b.classList.add('wrong')});
       state.reviewResults[state.reviewIdx]={correct:ok,chosen,answer:correct};
-      // Update word progress for correct/wrong
-      const wp=getWordProgress(currentUser);
-      if(wp[word.en]){wp[word.en].correct=(wp[word.en].correct||0)+(ok?1:0);wp[word.en].wrong=(wp[word.en].wrong||0)+(ok?0:1);wp[word.en].lastReview=getToday();setWordProgress(currentUser,wp)}
-      _saveSession();
+      const wp=await getWordProgress();
+      if(wp[word.en]){wp[word.en].correct=(wp[word.en].correct||0)+(ok?1:0);wp[word.en].wrong=(wp[word.en].wrong||0)+(ok?0:1);wp[word.en].lastReview=getToday();await setWordProgress(wp)}
+      await _saveSession();
       document.getElementById('fb').classList.remove('hidden');
       document.getElementById('fb').innerHTML=(ok?'<span style="color:#9bb88b;font-weight:600;font-size:16px">✓ 正确</span>':'<span style="color:#d49595;font-weight:600;font-size:16px">✗ 正确答案是 <strong style="color:#2d2d2d">'+correct+'</strong></span>')+'<br><button class="btn-primary" id="nextBtn" style="margin-top:12px;width:auto;padding:10px 32px">'+(state.reviewIdx<total-1?'下一题':'查看结果')+'</button>';
       document.getElementById('nextBtn').addEventListener('click',nextReview);
     })});
   }else{document.getElementById('nextBtn').addEventListener('click',nextReview)}
 }
-function nextReview(){state.reviewIdx++;if(state.reviewIdx>=state.wordList.length){state.phase='done';_saveSession();render()}else{_saveSession();render()}}
+async function nextReview(){state.reviewIdx++;if(state.reviewIdx>=state.wordList.length){state.phase='done';await _saveSession();render()}else{await _saveSession();render()}}
 
 // ==================== RESULT ====================
-function renderResult(){
-  const results=state.reviewResults;
-  const cc=results.filter(r=>r&&r.correct).length;
-  const total=results.length,pct=total>0?Math.round((cc/total)*100):0;
-  const isAssoc=state.mode==='association';
-  const s=getStats(currentUser);
-  s.totalWords=(s.totalWords||0)+state.wordList.length;
-  saveStats(currentUser,s);
-  const items=state.wordList.map(w=>{const r=results.find(res=>res&&res.answer===w.en);return{word:w,result:r}}).filter(i=>i.result);
-  $app.innerHTML='<div class="card"><div style="text-align:center;margin-bottom:4px"><span class="mode-badge '+(isAssoc?'association':'emoji')+'">'+(isAssoc?'联想词':'Emoji')+'模式</span></div><div class="result-score"><div class="score-num">'+pct+'%</div><div class="score-label">'+cc+' / '+total+' 正确</div></div><div class="result-detail">'+items.map(i=>'<div class="result-item"><span class="ri-word">'+i.word.en+' <span class="ri-zh">'+i.word.zh+'</span></span><span class="ri-status">'+(i.result.correct?'✅':'❌')+'</span></div>').join('')+'</div><div class="result-actions"><button class="btn-primary" data-action="retry">再学一轮</button><button class="btn-secondary" data-action="home">首页</button></div></div>';
-  $app.querySelector('[data-action="retry"]').addEventListener('click',()=>startMode(state.mode));
-  $app.querySelector('[data-action="home"]').addEventListener('click',()=>{state=defaultState();render()});
+async function renderResult(){
+  const results = state.reviewResults;
+  const cc = results.filter(r => r && r.correct).length;
+  const total = results.length, pct = total > 0 ? Math.round((cc / total) * 100) : 0;
+  const isAssoc = state.mode === 'association';
+  const s = await getStats();
+  s.totalWords = (s.totalWords || 0) + state.wordList.length;
+  await saveStats(s);
+  const items = state.wordList.map(w => { const r = results.find(res => res && res.answer === w.en); return { word: w, result: r } }).filter(i => i.result);
+  $app.innerHTML = '<div class="card"><div style="text-align:center;margin-bottom:4px"><span class="mode-badge ' + (isAssoc ? 'association' : 'emoji') + '">' + (isAssoc ? '联想词' : 'Emoji') + '模式</span></div><div class="result-score"><div class="score-num">' + pct + '%</div><div class="score-label">' + cc + ' / ' + total + ' 正确</div></div><div class="result-detail">' + items.map(i => '<div class="result-item"><span class="ri-word">' + i.word.en + ' <span class="ri-zh">' + i.word.zh + '</span></span><span class="ri-status">' + (i.result.correct ? '✅' : '❌') + '</span></div>').join('') + '</div><div class="result-actions"><button class="btn-primary" data-action="retry">再学一轮</button><button class="btn-secondary" data-action="home">首页</button></div></div>';
+  $app.querySelector('[data-action="retry"]').addEventListener('click', () => startMode(state.mode));
+  $app.querySelector('[data-action="home"]').addEventListener('click', () => { state = defaultState(); render() });
 }
 
 /* ============ STREAK ============ */
@@ -752,7 +834,6 @@ function calcStreak(dates){
   }return streak
 }
 
-render();
 </script>
 </body>
 </html>
